@@ -20,6 +20,6 @@ public class NewsSyncController {
 
 	@PostMapping("/sync")
 	public NewsSyncResponseDto syncNews(@RequestParam(value = "hours", defaultValue = "24") int hours) {
-		return newsSyncService.syncLatestIndiaNews(hours);
+		return newsSyncService.syncLatestNews(hours);
 	}
 }

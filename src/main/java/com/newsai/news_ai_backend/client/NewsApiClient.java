@@ -1,5 +1,8 @@
 package com.newsai.news_ai_backend.client;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -14,9 +17,7 @@ public class NewsApiClient {
 	private String apiKey;
 
 	public String fetchRelatedArticles(String query) {
-		if (apiKey == null || apiKey.isBlank()) {
-			throw new IllegalStateException("NewsAPI key is missing. Set NEWSAPI_API_KEY before fetching related articles.");
-		}
+		requireApiKey("fetching related articles");
 
 		String url = UriComponentsBuilder
 				.fromUriString("https://newsapi.org/v2/everything")
@@ -32,48 +33,23 @@ public class NewsApiClient {
 	}
 
 	public String fetchIndiaNewsSince(int hours, int pageSize) {
-		if (apiKey == null || apiKey.isBlank()) {
-			throw new IllegalStateException("NewsAPI key is missing. Set NewsAPI key before syncing news.");
-		}
+		return fetchSearchNewsSince("india", hours, pageSize);
+	}
 
-		String from = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
-				.minusHours(hours)
-				.toString();
-
-		String url = UriComponentsBuilder
-				.fromUriString("https://newsapi.org/v2/everything")
-				.queryParam("q", "india")
-				.queryParam("from", from)
-				.queryParam("sortBy", "publishedAt")
-				.queryParam("pageSize", pageSize)
-				.queryParam("apiKey", apiKey)
-				.build()
-				.toUriString();
-
-		return restTemplate.getForObject(url, String.class);
+	public String fetchWorldNewsSince(int hours, int pageSize) {
+		return fetchSearchNewsSince("world", hours, pageSize);
 	}
 
 	public String fetchIndiaNews(int pageSize) {
-		if (apiKey == null || apiKey.isBlank()) {
-			throw new IllegalStateException("NewsAPI key is missing. Set NewsAPI key before syncing news.");
-		}
+		return fetchSearchNews("india", pageSize);
+	}
 
-		String url = UriComponentsBuilder
-				.fromUriString("https://newsapi.org/v2/everything")
-				.queryParam("q", "india")
-				.queryParam("sortBy", "publishedAt")
-				.queryParam("pageSize", pageSize)
-				.queryParam("apiKey", apiKey)
-				.build()
-				.toUriString();
-
-		return restTemplate.getForObject(url, String.class);
+	public String fetchWorldNews(int pageSize) {
+		return fetchSearchNews("world", pageSize);
 	}
 
 	public String fetchIndiaTopHeadlines(int pageSize) {
-		if (apiKey == null || apiKey.isBlank()) {
-			throw new IllegalStateException("NewsAPI key is missing. Set NewsAPI key before syncing news.");
-		}
+		requireApiKey("syncing news");
 
 		String url = UriComponentsBuilder
 				.fromUriString("https://newsapi.org/v2/top-headlines")
@@ -85,5 +61,47 @@ public class NewsApiClient {
 
 		return restTemplate.getForObject(url, String.class);
 	}
-	
+
+	private String fetchSearchNewsSince(String query, int hours, int pageSize) {
+		requireApiKey("syncing news");
+
+		String from = OffsetDateTime.now(ZoneOffset.UTC)
+				.minusHours(hours)
+				.toString();
+
+		String url = UriComponentsBuilder
+				.fromUriString("https://newsapi.org/v2/everything")
+				.queryParam("q", query)
+				.queryParam("language", "en")
+				.queryParam("from", from)
+				.queryParam("sortBy", "publishedAt")
+				.queryParam("pageSize", pageSize)
+				.queryParam("apiKey", apiKey)
+				.build()
+				.toUriString();
+
+		return restTemplate.getForObject(url, String.class);
+	}
+
+	private String fetchSearchNews(String query, int pageSize) {
+		requireApiKey("syncing news");
+
+		String url = UriComponentsBuilder
+				.fromUriString("https://newsapi.org/v2/everything")
+				.queryParam("q", query)
+				.queryParam("language", "en")
+				.queryParam("sortBy", "publishedAt")
+				.queryParam("pageSize", pageSize)
+				.queryParam("apiKey", apiKey)
+				.build()
+				.toUriString();
+
+		return restTemplate.getForObject(url, String.class);
+	}
+
+	private void requireApiKey(String action) {
+		if (apiKey == null || apiKey.isBlank()) {
+			throw new IllegalStateException("NewsAPI key is missing. Set NEWSAPI_API_KEY before " + action + ".");
+		}
+	}
 }

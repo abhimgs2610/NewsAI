@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -33,8 +34,6 @@ public class NewsSyncService {
 	private static final int DEFAULT_HOURS = 24;
 	private static final int NEWSAPI_PAGE_SIZE = 100;
 	private static final int GNEWS_PAGE_SIZE = 10;
-	private static final int ENRICHMENT_LIMIT = 5;
-	private static final int ENRICHMENT_RETRY_LIMIT = 3;
 	private static final int TITLE_LIMIT = 1000;
 	private static final int DESCRIPTION_LIMIT = 1000;
 	private static final int CONTENT_LIMIT = 2000;
@@ -47,6 +46,13 @@ public class NewsSyncService {
 	private final NewsArticleRepository articleRepository;
 	private final NewsAiEnrichmentRepository enrichmentRepository;
 	private final ObjectMapper objectMapper = new ObjectMapper();
+
+
+	@Value("${enrichment.retry.count:3}")
+	private int enrichmentRetryCount;
+
+	@Value("${enrichment.retry.baseDelayMs:1500}")
+	private long enrichmentRetryBaseDelayMs;
 
 	public NewsSyncService(NewsApiClient newsApiClient, GNewsClient gNewsClient, OpenAiClient openAiClient,
 			NewsArticleRepository articleRepository, NewsAiEnrichmentRepository enrichmentRepository) {
@@ -62,66 +68,80 @@ public class NewsSyncService {
 	}
 
 	public NewsSyncResponseDto syncLatestIndiaNews(int hours) {
+		return syncLatestNews(hours);
+	}
+
+	public NewsSyncResponseDto syncLatestNews(int hours) {
 		try {
 			Set<String> seenUrls = new LinkedHashSet<>();
 			Set<Long> candidateArticleIds = new LinkedHashSet<>();
 			SyncCounter counter = new SyncCounter();
 
-			syncNewsApi(hours, seenUrls, candidateArticleIds, counter);
-			syncGNews(hours, seenUrls, candidateArticleIds, counter);
+			syncNewsApiIndia(hours, seenUrls, candidateArticleIds, counter);
+			syncNewsApiWorld(hours, seenUrls, candidateArticleIds, counter);
+			syncGNewsIndia(hours, seenUrls, candidateArticleIds, counter);
+			syncGNewsWorld(hours, seenUrls, candidateArticleIds, counter);
 			enrichArticles(candidateArticleIds, counter);
 
 			logger.info("News sync completed. fetched={}, saved={}, updated={}, skipped={}, enriched={}",
 					counter.fetched, counter.saved, counter.updated, counter.skipped, counter.enriched);
 			return toResponse(counter);
 		} catch (Exception e) {
-			throw new RuntimeException("Could not sync latest India news", e);
+			throw new RuntimeException("Could not sync latest India and World news", e);
 		}
 	}
 
-	private void syncNewsApi(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
+	private void syncNewsApiIndia(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
 			throws Exception {
 		String response = newsApiClient.fetchIndiaNewsSince(hours, NEWSAPI_PAGE_SIZE);
-		JsonNode articles = objectMapper.readTree(response).path("articles");
-		if (!articles.isArray()) {
-			throw new IllegalStateException("NewsAPI response did not contain an articles list.");
-		}
+		JsonNode articles = readArticles(response, "NewsAPI India response");
 
 		if (articles.isEmpty()) {
-			logger.info("NewsAPI last-{}h search returned 0 articles. Trying plain India search fallback.", hours);
+			logger.info("NewsAPI India last-{}h search returned 0 articles. Trying plain India search fallback.", hours);
 			response = newsApiClient.fetchIndiaNews(NEWSAPI_PAGE_SIZE);
-			articles = objectMapper.readTree(response).path("articles");
-		}
-
-		if (!articles.isArray()) {
-			throw new IllegalStateException("NewsAPI plain India response did not contain an articles list.");
+			articles = readArticles(response, "NewsAPI plain India response");
 		}
 
 		if (articles.isEmpty()) {
 			logger.info("NewsAPI plain India search returned 0 articles. Trying India top-headlines fallback.");
 			response = newsApiClient.fetchIndiaTopHeadlines(NEWSAPI_PAGE_SIZE);
-			articles = objectMapper.readTree(response).path("articles");
+			articles = readArticles(response, "NewsAPI India top-headlines response");
 		}
 
-		if (!articles.isArray()) {
-			throw new IllegalStateException("NewsAPI top-headlines response did not contain an articles list.");
-		}
-
-		counter.fetched += articles.size();
-		counter.newsApiFetched += articles.size();
-		for (JsonNode article : articles) {
-			saveRawArticle(article, "NewsAPI", "urlToImage", seenUrls, candidateArticleIds, counter);
-		}
+		saveRawArticles(articles, "NewsAPI", "urlToImage", seenUrls, candidateArticleIds, counter);
 	}
 
-	private void syncGNews(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
+	private void syncNewsApiWorld(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
 			throws Exception {
+		String response = newsApiClient.fetchWorldNewsSince(hours, NEWSAPI_PAGE_SIZE);
+		JsonNode articles = readArticles(response, "NewsAPI World response");
+
+		if (articles.isEmpty()) {
+			logger.info("NewsAPI World last-{}h search returned 0 articles. Trying plain World search fallback.", hours);
+			response = newsApiClient.fetchWorldNews(NEWSAPI_PAGE_SIZE);
+			articles = readArticles(response, "NewsAPI plain World response");
+		}
+
+		saveRawArticles(articles, "NewsAPI", "urlToImage", seenUrls, candidateArticleIds, counter);
+	}
+
+	private void syncGNewsIndia(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
+			throws Exception {
+		syncGNewsResponse(gNewsClient.fetchIndiaNewsSince(hours, GNEWS_PAGE_SIZE), seenUrls, candidateArticleIds, counter);
+	}
+
+	private void syncGNewsWorld(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
+			throws Exception {
+		syncGNewsResponse(gNewsClient.fetchWorldNewsSince(hours, GNEWS_PAGE_SIZE), seenUrls, candidateArticleIds, counter);
+	}
+
+	private void syncGNewsResponse(String response, Set<String> seenUrls, Set<Long> candidateArticleIds,
+			SyncCounter counter) throws Exception {
 		if (!gNewsClient.hasApiKey()) {
 			logger.info("GNews sync skipped because gnews.api-key is not configured.");
 			return;
 		}
 
-		String response = gNewsClient.fetchIndiaNewsSince(hours, GNEWS_PAGE_SIZE);
 		if (response == null || response.isBlank()) {
 			return;
 		}
@@ -132,10 +152,27 @@ public class NewsSyncService {
 			return;
 		}
 
+		saveRawArticles(articles, "GNews", "image", seenUrls, candidateArticleIds, counter);
+	}
+
+	private JsonNode readArticles(String response, String responseName) throws Exception {
+		JsonNode articles = objectMapper.readTree(response).path("articles");
+		if (!articles.isArray()) {
+			throw new IllegalStateException(responseName + " did not contain an articles list.");
+		}
+		return articles;
+	}
+
+	private void saveRawArticles(JsonNode articles, String provider, String imageField, Set<String> seenUrls,
+			Set<Long> candidateArticleIds, SyncCounter counter) {
 		counter.fetched += articles.size();
-		counter.gNewsFetched += articles.size();
+		if ("NewsAPI".equals(provider)) {
+			counter.newsApiFetched += articles.size();
+		} else if ("GNews".equals(provider)) {
+			counter.gNewsFetched += articles.size();
+		}
 		for (JsonNode article : articles) {
-			saveRawArticle(article, "GNews", "image", seenUrls, candidateArticleIds, counter);
+			saveRawArticle(article, provider, imageField, seenUrls, candidateArticleIds, counter);
 		}
 	}
 
@@ -183,7 +220,11 @@ public class NewsSyncService {
 			return;
 		}
 
-		List<Long> selectedIds = candidateArticleIds.stream().limit(ENRICHMENT_LIMIT).toList();
+		List<Long> unenrichedIds = enrichmentRepository
+				.findArticleIdsWithoutEnrichment(new ArrayList<>(candidateArticleIds));
+		List<Long> selectedIds = candidateArticleIds.stream()
+				.filter(unenrichedIds::contains)
+				.toList();
 		List<NewsArticle> articles = articleRepository.findByIdIn(selectedIds);
 		List<NewsArticle> ordered = new ArrayList<>();
 		for (Long id : selectedIds) {
@@ -201,20 +242,19 @@ public class NewsSyncService {
 			}
 		}
 
-		int nonProcessed = Math.max(0, candidateArticleIds.size() - ENRICHMENT_LIMIT);
-		counter.enrichmentSkipped += nonProcessed;
 	}
 
 	private EnrichmentResult enrichArticleWithRetry(NewsArticle article) throws Exception {
 		int attempt = 0;
-		while (attempt < ENRICHMENT_RETRY_LIMIT) {
+		int safeRetryCount = Math.max(1, enrichmentRetryCount);
+		while (attempt < safeRetryCount) {
 			try {
 				return enrichArticleWithGroq(article);
 			} catch (HttpClientErrorException.TooManyRequests e) {
 				attempt++;
 				long waitMs = parseRetryMillis(e.getResponseBodyAsString(), attempt);
 				logger.warn("Groq rate limited for article id={}, attempt={}/{}. Waiting {} ms.",
-						article.getId(), attempt, ENRICHMENT_RETRY_LIMIT, waitMs);
+						article.getId(), attempt, safeRetryCount, waitMs);
 				Thread.sleep(waitMs);
 			}
 		}
@@ -285,12 +325,17 @@ public class NewsSyncService {
 			result.briefStory = trimToLength(firstNonBlank(article.getDescription(), article.getContent()),
 					CONTENT_LIMIT);
 		}
-		if (result.country.isBlank()) {
-			result.country = "india";
-		}
+		result.country = normalizeCountry(result.country);
 		return result;
 	}
 
+	private String normalizeCountry(String country) {
+		String value = country == null ? "" : country.trim();
+		if (value.isBlank() || "unknown".equalsIgnoreCase(value)) {
+			return "World";
+		}
+		return value;
+	}
 	private void saveEnrichment(NewsArticle article, EnrichmentResult result) {
 		NewsAiEnrichment enrichment = enrichmentRepository.findByNewsArticleId(article.getId())
 				.orElseGet(NewsAiEnrichment::new);
@@ -394,7 +439,7 @@ public class NewsSyncService {
 				return (long) ((seconds + 0.5) * 1000);
 			}
 		}
-		return 1500L * attempt;
+		return Math.max(1L, enrichmentRetryBaseDelayMs) * attempt;
 	}
 
 	private LocalDate parsePublishedDate(String publishedAt) {
@@ -450,3 +495,10 @@ public class NewsSyncService {
 		private String city;
 	}
 }
+
+
+
+
+
+
+

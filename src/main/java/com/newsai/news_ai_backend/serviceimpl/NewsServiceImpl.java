@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import com.newsai.news_ai_backend.dto.CountryCountDto;
 import com.newsai.news_ai_backend.dto.NewsFeedDto;
 import com.newsai.news_ai_backend.dto.StoryResponseDto;
 import com.newsai.news_ai_backend.model.NewsAiEnrichment;
@@ -40,21 +41,45 @@ public class NewsServiceImpl implements NewsService {
 	}
 
 	@Override
-	public List<NewsFeedDto> getFeed(String category, String state, String city, int limit) {
+	public List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit) {
 		int safeLimit = Math.max(1, Math.min(limit, 100));
-		return enrichmentRepository.findFeed(clean(category), clean(state), clean(city), PageRequest.of(0, safeLimit))
+		return enrichmentRepository.findFeed(clean(country), clean(category), clean(state), clean(city), clean(query),
+				PageRequest.of(0, safeLimit))
 				.stream()
 				.map(this::toFeedDto)
 				.toList();
 	}
 
 	@Override
-	public List<NewsFeedDto> getHotNews(int limit) {
+	public List<NewsFeedDto> getHotNews(String query, int limit) {
 		int safeLimit = Math.max(1, Math.min(limit, 100));
-		return enrichmentRepository.findHot(PageRequest.of(0, safeLimit))
+		return enrichmentRepository.findHot(clean(query), PageRequest.of(0, safeLimit))
 				.stream()
 				.map(this::toFeedDto)
 				.toList();
+	}
+
+	@Override
+	public List<CountryCountDto> getCountries() {
+		return enrichmentRepository.findCountryCounts()
+				.stream()
+				.map(row -> new CountryCountDto((String) row[0], ((Number) row[1]).longValue()))
+				.toList();
+	}
+
+	@Override
+	public List<String> getCategories() {
+		return enrichmentRepository.findDistinctIndiaCategories();
+	}
+
+	@Override
+	public List<String> getStates() {
+		return enrichmentRepository.findDistinctIndiaStates();
+	}
+
+	@Override
+	public List<String> getCities(String state) {
+		return enrichmentRepository.findDistinctIndiaCities(clean(state));
 	}
 
 	@Override
@@ -157,3 +182,9 @@ public class NewsServiceImpl implements NewsService {
 		return trimmed.substring(0, maxLength).trim();
 	}
 }
+
+
+
+
+
+
