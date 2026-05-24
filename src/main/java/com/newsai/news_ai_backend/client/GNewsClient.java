@@ -21,6 +21,14 @@ public class GNewsClient {
 	}
 
 	public String fetchIndiaNewsSince(int hours, int max) {
+		return fetchSearchNewsSince("India", "in", hours, max);
+	}
+
+	public String fetchWorldNewsSince(int hours, int max) {
+		return fetchSearchNewsSince("world", "", hours, max);
+	}
+
+	private String fetchSearchNewsSince(String query, String countryCode, int hours, int max) {
 		if (!hasApiKey()) {
 			return "";
 		}
@@ -29,17 +37,18 @@ public class GNewsClient {
 				.minusHours(hours)
 				.toString();
 
-		String url = UriComponentsBuilder
+		UriComponentsBuilder builder = UriComponentsBuilder
 				.fromUriString("https://gnews.io/api/v4/search")
-				.queryParam("q", "India")
+				.queryParam("q", query)
 				.queryParam("lang", "en")
-				.queryParam("country", "in")
 				.queryParam("from", from)
 				.queryParam("max", Math.max(1, Math.min(max, 10)))
-				.queryParam("apikey", apiKey)
-				.build()
-				.toUriString();
+				.queryParam("apikey", apiKey);
 
-		return restTemplate.getForObject(url, String.class);
+		if (countryCode != null && !countryCode.isBlank()) {
+			builder.queryParam("country", countryCode);
+		}
+
+		return restTemplate.getForObject(builder.build().toUriString(), String.class);
 	}
 }
