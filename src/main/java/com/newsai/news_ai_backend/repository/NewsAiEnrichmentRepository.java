@@ -82,7 +82,7 @@ public interface NewsAiEnrichmentRepository extends JpaRepository<NewsAiEnrichme
 			WHERE e.city IS NOT NULL AND TRIM(e.city) <> ''
 			  AND LOWER(TRIM(e.city)) <> 'unknown'
 			  AND LOWER(TRIM(e.country)) = 'india'
-			  AND (:state IS NULL OR :state = '' OR LOWER(e.state) = LOWER(:state))
+			  AND (:state IS NULL OR :state = '' OR LOWER(e.state) LIKE LOWER(CONCAT('%', :state, '%')))
 			ORDER BY TRIM(e.city) ASC
 			""")
 	List<String> findDistinctIndiaCities(@Param("state") String state);
@@ -93,10 +93,10 @@ public interface NewsAiEnrichmentRepository extends JpaRepository<NewsAiEnrichme
 			JOIN FETCH e.newsArticle a
 			WHERE (:country IS NULL OR :country = '' OR
 			       (LOWER(:country) = 'world' AND (e.country IS NULL OR LOWER(e.country) <> 'india')) OR
-			       (LOWER(:country) <> 'world' AND LOWER(e.country) = LOWER(:country)))
-			  AND (:category IS NULL OR :category = '' OR LOWER(e.category) = LOWER(:category))
-			  AND (:state IS NULL OR :state = '' OR LOWER(e.state) = LOWER(:state))
-			  AND (:city IS NULL OR :city = '' OR LOWER(e.city) = LOWER(:city))
+			       (LOWER(:country) <> 'world' AND LOWER(e.country) LIKE LOWER(CONCAT('%', :country, '%'))))
+			  AND (:category IS NULL OR :category = '' OR LOWER(e.category) LIKE LOWER(CONCAT('%', :category, '%')))
+			  AND (:state IS NULL OR :state = '' OR LOWER(e.state) LIKE LOWER(CONCAT('%', :state, '%')))
+			  AND (:city IS NULL OR :city = '' OR LOWER(e.city) LIKE LOWER(CONCAT('%', :city, '%')))
 			  AND (:query IS NULL OR :query = '' OR
 			       LOWER(e.goodHeadline) LIKE LOWER(CONCAT('%', :query, '%')) OR
 			       LOWER(e.briefStory) LIKE LOWER(CONCAT('%', :query, '%')) OR
@@ -126,4 +126,5 @@ public interface NewsAiEnrichmentRepository extends JpaRepository<NewsAiEnrichme
 			""")
 	List<NewsAiEnrichment> findHot(@Param("query") String query, Pageable pageable);
 }
+
 

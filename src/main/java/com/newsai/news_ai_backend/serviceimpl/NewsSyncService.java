@@ -277,11 +277,20 @@ public class NewsSyncService {
 				}
 
 				Rules:
-				- Decide category naturally. Do not force predefined categories.
+				- Decide one best category naturally. Return exactly one category value. Never return multiple categories, combined categories, comma-separated categories, slash-separated categories, or values like "Business/Economy". Pick the single best category, for example "Business" or "Economy", not both.
 				- goodHeadline must be concise, clean and human-friendly.
 				- briefStory must be 1-3 sentences.
 				- importanceScore must be an integer from 0 to 100.
-				- country/state/city can be empty strings if unknown.
+				- Location rules are strict:
+				  1. Never return "Unknown", "Not found", "N/A", "None", or similar placeholder text for country/state/city.
+				  2. Return at most one country, one state, and one city. Never return comma-separated or slash-separated location lists.
+				  3. If multiple locations are mentioned, choose the most central/relevant location for the article.
+				  4. If city is present, state and country must also be present.
+				  5. If city is absent but state is present, country must be present.
+				  6. If city and state are both absent, country must still be present.
+				  7. If the exact city or state cannot be confidently identified, return an empty string for that field, but still infer the most likely country from title/description/content/source/url.
+				  8. Do not put a city name in state, and do not put a state name in city.
+				- Use all raw inputs, especially source and URL domain, to infer country when article text is limited.
 				- Do not include markdown, explanations, or extra keys.
 
 				Raw title: %s
@@ -299,12 +308,12 @@ public class NewsSyncService {
 		JsonNode root = objectMapper.readTree(jsonPayload);
 
 		EnrichmentResult result = new EnrichmentResult();
-		result.category = trimToLength(textValue(root, "category"), 255);
+		result.category = normalizeSingleValue(trimToLength(textValue(root, "category"), 255));
 		result.goodHeadline = trimToLength(textValue(root, "goodHeadline"), TITLE_LIMIT);
 		result.briefStory = trimToLength(textValue(root, "briefStory"), CONTENT_LIMIT);
-		result.country = trimToLength(textValue(root, "country"), 255);
-		result.state = trimToLength(textValue(root, "state"), 255);
-		result.city = trimToLength(textValue(root, "city"), 255);
+		result.country = normalizeSingleValue(trimToLength(textValue(root, "country"), 255));
+		result.state = normalizeSingleValue(trimToLength(textValue(root, "state"), 255));
+		result.city = normalizeSingleValue(trimToLength(textValue(root, "city"), 255));
 
 		int score = root.path("importanceScore").asInt(50);
 		if (score < 0) {
@@ -325,16 +334,56 @@ public class NewsSyncService {
 			result.briefStory = trimToLength(firstNonBlank(article.getDescription(), article.getContent()),
 					CONTENT_LIMIT);
 		}
-		result.country = normalizeCountry(result.country);
+		normalizeLocation(result);
 		return result;
 	}
 
-	private String normalizeCountry(String country) {
-		String value = country == null ? "" : country.trim();
-		if (value.isBlank() || "unknown".equalsIgnoreCase(value)) {
-			return "World";
+	private String normalizeSingleValue(String value) {
+		if (value == null) {
+			return "";
 		}
-		return value;
+		String cleaned = value.trim();
+		int comma = cleaned.indexOf(',');
+		if (comma > 0) {
+			cleaned = cleaned.substring(0, comma).trim();
+		}
+		int semicolon = cleaned.indexOf(';');
+		if (semicolon > 0) {
+			cleaned = cleaned.substring(0, semicolon).trim();
+		}
+		int slash = cleaned.indexOf('/');
+		if (slash > 0) {
+			cleaned = cleaned.substring(0, slash).trim();
+		}
+		return cleaned;
+	}
+	private void normalizeLocation(EnrichmentResult result) {
+		result.country = normalizeCountry(result.country);
+		result.state = normalizeOptionalLocation(result.state);
+		result.city = normalizeOptionalLocation(result.city);
+
+		if (!result.city.isBlank() && result.state.isBlank()) {
+			result.city = "";
+		}
+	}
+
+	private String normalizeCountry(String country) {
+		String value = normalizeOptionalLocation(country);
+		return value.isBlank() ? "World" : value;
+	}
+
+	private String normalizeOptionalLocation(String value) {
+		String cleaned = value == null ? "" : value.trim();
+		if (cleaned.isBlank()) {
+			return "";
+		}
+		String lower = cleaned.toLowerCase();
+		if (lower.equals("unknown") || lower.equals("not found") || lower.equals("n/a") || lower.equals("na")
+				|| lower.equals("none") || lower.equals("null") || lower.equals("not specified")
+				|| lower.equals("not available")) {
+			return "";
+		}
+		return cleaned;
 	}
 	private void saveEnrichment(NewsArticle article, EnrichmentResult result) {
 		NewsAiEnrichment enrichment = enrichmentRepository.findByNewsArticleId(article.getId())
@@ -495,6 +544,8 @@ public class NewsSyncService {
 		private String city;
 	}
 }
+
+
 
 
 
