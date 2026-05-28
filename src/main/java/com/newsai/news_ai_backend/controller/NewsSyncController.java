@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.newsai.news_ai_backend.dto.ApiResponseDto;
 import com.newsai.news_ai_backend.dto.NewsSyncResponseDto;
 import com.newsai.news_ai_backend.serviceimpl.NewsSyncService;
 
@@ -19,7 +20,7 @@ public class NewsSyncController {
 	}
 
 	@PostMapping("/sync")
-	public NewsSyncResponseDto syncNews(@RequestParam(value = "hours", defaultValue = "24") int hours) {
-		return newsSyncService.syncLatestNews(hours);
+	public ApiResponseDto<NewsSyncResponseDto> syncNews(@RequestParam(value = "hours", defaultValue = "24") int hours) {
+		return ApiResponseDto.success(newsSyncService.syncLatestNews(hours), "News sync completed successfully");
 	}
 }

@@ -125,6 +125,12 @@ public interface NewsAiEnrichmentRepository extends JpaRepository<NewsAiEnrichme
 			ORDER BY e.importanceScore DESC, a.publishedAt DESC, a.id DESC
 			""")
 	List<NewsAiEnrichment> findHot(@Param("query") String query, Pageable pageable);
+	@Query("""
+			SELECT e
+			FROM NewsAiEnrichment e
+			JOIN FETCH e.newsArticle a
+			WHERE a.id IN :articleIds
+			ORDER BY e.importanceScore DESC, a.publishedAt DESC, a.id DESC
+			""")
+	List<NewsAiEnrichment> findByArticleIdsWithArticle(@Param("articleIds") List<Long> articleIds);
 }
-
-

@@ -20,6 +20,25 @@ public class GNewsClient {
 		return apiKey != null && !apiKey.isBlank();
 	}
 
+	
+	public String fetchDiscoveryNews(String query, String countryCode, int max) {
+		if (!hasApiKey()) {
+			return "";
+		}
+
+		UriComponentsBuilder builder = UriComponentsBuilder
+				.fromUriString("https://gnews.io/api/v4/search")
+				.queryParam("q", query)
+				.queryParam("lang", "en")
+				.queryParam("max", Math.max(1, Math.min(max, 10)))
+				.queryParam("apikey", apiKey);
+
+		if (countryCode != null && !countryCode.isBlank()) {
+			builder.queryParam("country", countryCode);
+		}
+
+		return restTemplate.getForObject(builder.build().toUriString(), String.class);
+	}
 	public String fetchIndiaNewsSince(int hours, int max) {
 		return fetchSearchNewsSince("India", "in", hours, max);
 	}

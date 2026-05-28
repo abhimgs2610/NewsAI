@@ -1,12 +1,15 @@
 package com.newsai.news_ai_backend.serviceimpl;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.newsai.news_ai_backend.dto.CountryCountDto;
+import com.newsai.news_ai_backend.dto.NewsDiscoveryRequestDto;
+import com.newsai.news_ai_backend.dto.NewsDiscoveryResponseDto;
 import com.newsai.news_ai_backend.dto.NewsFeedDto;
 import com.newsai.news_ai_backend.dto.StoryResponseDto;
 import com.newsai.news_ai_backend.model.NewsAiEnrichment;
@@ -29,15 +32,17 @@ public class NewsServiceImpl implements NewsService {
 	private final NewsStoryRepository storyRepository;
 	private final StoryGenerator storyGenerator;
 	private final ArticleContentExtractor articleContentExtractor;
+	private final NewsSyncService newsSyncService;
 
 	public NewsServiceImpl(NewsAiEnrichmentRepository enrichmentRepository, NewsArticleRepository articleRepository,
 			NewsStoryRepository storyRepository, StoryGenerator storyGenerator,
-			ArticleContentExtractor articleContentExtractor) {
+			ArticleContentExtractor articleContentExtractor, NewsSyncService newsSyncService) {
 		this.enrichmentRepository = enrichmentRepository;
 		this.articleRepository = articleRepository;
 		this.storyRepository = storyRepository;
 		this.storyGenerator = storyGenerator;
 		this.articleContentExtractor = articleContentExtractor;
+		this.newsSyncService = newsSyncService;
 	}
 
 	@Override
@@ -50,6 +55,47 @@ public class NewsServiceImpl implements NewsService {
 				.toList();
 	}
 
+	@Override
+	public NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request, int limit) {
+		String context = clean(request == null ? "" : request.getContext());
+		if (context.isBlank()) {
+			throw new IllegalArgumentException("context is required");
+		}
+
+		int safeLimit = Math.max(1, Math.min(limit, 20));
+		String country = clean(request.getCountry());
+		String state = clean(request.getState());
+		String city = clean(request.getCity());
+		String providerQuery = buildProviderQuery(city, state, country, context);
+
+		List<NewsAiEnrichment> enrichedMatches = enrichmentRepository
+				.findFeed("", "", "", "", context, PageRequest.of(0, safeLimit))
+				.stream()
+				.map(enrichment -> newsSyncService.applyDiscoveryLocationOverrides(enrichment, country, state, city))
+				.toList();
+		if (!enrichedMatches.isEmpty()) {
+			return discoveryResponse("FOUND_EXISTING_ENRICHED", "Found matching news from existing enriched articles.",
+					providerQuery, enrichedMatches);
+		}
+
+		articleRepository.findRawMatches(context, PageRequest.of(0, safeLimit))
+				.forEach(article -> newsSyncService.enrichArticleForDiscovery(article, country, state, city));
+		List<NewsAiEnrichment> rawMatches = enrichmentRepository
+				.findFeed(country, "", state, city, context, PageRequest.of(0, safeLimit));
+		if (!rawMatches.isEmpty()) {
+			return discoveryResponse("FOUND_RAW_AND_ENRICHED",
+					"Found matching raw news locally and enriched it.", providerQuery, rawMatches);
+		}
+
+		List<NewsAiEnrichment> fetchedMatches = newsSyncService.discoverFromProviders(providerQuery, country, state, city, safeLimit);
+		if (!fetchedMatches.isEmpty()) {
+			return discoveryResponse("FETCHED_FROM_PROVIDERS",
+					"Fetched matching news from providers and enriched available articles.", providerQuery, fetchedMatches);
+		}
+
+		return new NewsDiscoveryResponseDto("NO_MATCH_FOUND",
+				"No matching news found locally or from providers.", providerQuery, List.of());
+	}
 	@Override
 	public List<NewsFeedDto> getHotNews(String query, int limit) {
 		int safeLimit = Math.max(1, Math.min(limit, 100));
@@ -159,6 +205,27 @@ public class NewsServiceImpl implements NewsService {
 		return dto;
 	}
 
+	private NewsDiscoveryResponseDto discoveryResponse(String status, String message, String providerQuery,
+			List<NewsAiEnrichment> enrichments) {
+		return new NewsDiscoveryResponseDto(status, message, providerQuery,
+				enrichments.stream().map(this::toFeedDto).toList());
+	}
+
+	private String buildProviderQuery(String city, String state, String country, String context) {
+		List<String> parts = new ArrayList<>();
+		addIfPresent(parts, city);
+		addIfPresent(parts, state);
+		addIfPresent(parts, country);
+		addIfPresent(parts, context);
+		return String.join(" ", parts);
+	}
+
+	private void addIfPresent(List<String> parts, String value) {
+		String cleaned = clean(value);
+		if (!cleaned.isBlank()) {
+			parts.add(cleaned);
+		}
+	}
 	private String clean(String value) {
 		return value == null ? "" : value.trim();
 	}
