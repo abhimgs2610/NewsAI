@@ -32,6 +32,22 @@ public class NewsApiClient {
 		return restTemplate.getForObject(url, String.class);
 	}
 
+	
+	public String fetchDiscoveryNews(String query, int pageSize) {
+		requireApiKey("discovering news");
+
+		String url = UriComponentsBuilder
+				.fromUriString("https://newsapi.org/v2/everything")
+				.queryParam("q", query)
+				.queryParam("language", "en")
+				.queryParam("sortBy", "relevancy")
+				.queryParam("pageSize", pageSize)
+				.queryParam("apiKey", apiKey)
+				.build()
+				.toUriString();
+
+		return restTemplate.getForObject(url, String.class);
+	}
 	public String fetchIndiaNewsSince(int hours, int pageSize) {
 		return fetchSearchNewsSince("india", hours, pageSize);
 	}

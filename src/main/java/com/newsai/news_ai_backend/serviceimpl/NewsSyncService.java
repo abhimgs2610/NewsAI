@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,6 +46,7 @@ public class NewsSyncService {
 	private final OpenAiClient openAiClient;
 	private final NewsArticleRepository articleRepository;
 	private final NewsAiEnrichmentRepository enrichmentRepository;
+	private final BatchPauseService batchPauseService;
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 
@@ -55,12 +57,13 @@ public class NewsSyncService {
 	private long enrichmentRetryBaseDelayMs;
 
 	public NewsSyncService(NewsApiClient newsApiClient, GNewsClient gNewsClient, OpenAiClient openAiClient,
-			NewsArticleRepository articleRepository, NewsAiEnrichmentRepository enrichmentRepository) {
+			NewsArticleRepository articleRepository, NewsAiEnrichmentRepository enrichmentRepository, BatchPauseService batchPauseService) {
 		this.newsApiClient = newsApiClient;
 		this.gNewsClient = gNewsClient;
 		this.openAiClient = openAiClient;
 		this.articleRepository = articleRepository;
 		this.enrichmentRepository = enrichmentRepository;
+		this.batchPauseService = batchPauseService;
 	}
 
 	public NewsSyncResponseDto syncLatestIndiaNews() {
@@ -77,20 +80,111 @@ public class NewsSyncService {
 			Set<Long> candidateArticleIds = new LinkedHashSet<>();
 			SyncCounter counter = new SyncCounter();
 
+			ensureBatchNotPaused();
 			syncNewsApiIndia(hours, seenUrls, candidateArticleIds, counter);
+			ensureBatchNotPaused();
 			syncNewsApiWorld(hours, seenUrls, candidateArticleIds, counter);
+			ensureBatchNotPaused();
 			syncGNewsIndia(hours, seenUrls, candidateArticleIds, counter);
+			ensureBatchNotPaused();
 			syncGNewsWorld(hours, seenUrls, candidateArticleIds, counter);
-			enrichArticles(candidateArticleIds, counter);
+			ensureBatchNotPaused();
+			enrichArticles(candidateArticleIds, counter, true);
 
 			logger.info("News sync completed. fetched={}, saved={}, updated={}, skipped={}, enriched={}",
 					counter.fetched, counter.saved, counter.updated, counter.skipped, counter.enriched);
 			return toResponse(counter);
+		} catch (BatchPausedException e) {
+			throw e;
 		} catch (Exception e) {
 			throw new RuntimeException("Could not sync latest India and World news", e);
 		}
 	}
 
+	
+	public Optional<NewsAiEnrichment> enrichArticleIfNeeded(NewsArticle article) {
+		Optional<NewsAiEnrichment> existing = enrichmentRepository.findByNewsArticleId(article.getId());
+		if (existing.isPresent()) {
+			return existing;
+		}
+		try {
+			EnrichmentResult result = enrichArticleWithRetry(article);
+			saveEnrichment(article, result);
+			return enrichmentRepository.findByNewsArticleId(article.getId());
+		} catch (Exception e) {
+			logger.warn("Discovery enrichment failed for article id={}", article.getId(), e);
+			return Optional.empty();
+		}
+	}
+
+	public Optional<NewsAiEnrichment> enrichArticleForDiscovery(NewsArticle article, String country, String state,
+			String city) {
+		return enrichArticleIfNeeded(article)
+				.map(enrichment -> applyDiscoveryLocationOverrides(enrichment, country, state, city));
+	}
+
+	public NewsAiEnrichment applyDiscoveryLocationOverrides(NewsAiEnrichment enrichment, String country, String state,
+			String city) {
+		String cleanedCountry = trimToLength(country, SOURCE_LIMIT);
+		String cleanedState = trimToLength(state, SOURCE_LIMIT);
+		String cleanedCity = trimToLength(city, SOURCE_LIMIT);
+		if (!cleanedCountry.isBlank()) {
+			enrichment.setCountry(cleanedCountry);
+		}
+		if (!cleanedState.isBlank()) {
+			enrichment.setState(cleanedState);
+		}
+		if (!cleanedCity.isBlank()) {
+			enrichment.setCity(cleanedCity);
+		}
+		return enrichmentRepository.save(enrichment);
+	}
+
+	public List<NewsAiEnrichment> discoverFromProviders(String query, String country, String state, String city, int limit) {
+		String cleanedQuery = query == null ? "" : query.trim();
+		if (cleanedQuery.isBlank()) {
+			return List.of();
+		}
+
+		int safeNewsApiLimit = Math.max(1, Math.min(limit, NEWSAPI_PAGE_SIZE));
+		int safeGNewsLimit = Math.max(1, Math.min(limit, GNEWS_PAGE_SIZE));
+		Set<String> seenUrls = new LinkedHashSet<>();
+		Set<Long> candidateArticleIds = new LinkedHashSet<>();
+		SyncCounter counter = new SyncCounter();
+
+		try {
+			JsonNode newsApiArticles = readArticles(newsApiClient.fetchDiscoveryNews(cleanedQuery, safeNewsApiLimit),
+					"NewsAPI discovery response");
+			saveRawArticles(newsApiArticles, "NewsAPI", "urlToImage", seenUrls, candidateArticleIds, counter);
+		} catch (Exception e) {
+			logger.warn("NewsAPI discovery search failed for query={}", cleanedQuery, e);
+		}
+
+		try {
+			String gNewsResponse = gNewsClient.fetchDiscoveryNews(cleanedQuery, toGNewsCountryCode(country), safeGNewsLimit);
+			syncGNewsResponse(gNewsResponse, seenUrls, candidateArticleIds, counter);
+		} catch (Exception e) {
+			logger.warn("GNews discovery search failed for query={}", cleanedQuery, e);
+		}
+
+		enrichArticles(candidateArticleIds, counter, false);
+		if (candidateArticleIds.isEmpty()) {
+			return List.of();
+		}
+		return enrichmentRepository.findByArticleIdsWithArticle(new ArrayList<>(candidateArticleIds))
+				.stream()
+				.map(enrichment -> applyDiscoveryLocationOverrides(enrichment, country, state, city))
+				.limit(Math.max(1, Math.min(limit, 100)))
+				.toList();
+	}
+
+	private String toGNewsCountryCode(String country) {
+		if (country == null || country.isBlank()) {
+			return "";
+		}
+		String normalized = country.trim().toLowerCase();
+		return normalized.equals("india") ? "in" : "";
+	}
 	private void syncNewsApiIndia(int hours, Set<String> seenUrls, Set<Long> candidateArticleIds, SyncCounter counter)
 			throws Exception {
 		String response = newsApiClient.fetchIndiaNewsSince(hours, NEWSAPI_PAGE_SIZE);
@@ -215,7 +309,7 @@ public class NewsSyncService {
 		}
 	}
 
-	private void enrichArticles(Set<Long> candidateArticleIds, SyncCounter counter) {
+	private void enrichArticles(Set<Long> candidateArticleIds, SyncCounter counter, boolean allowPause) {
 		if (candidateArticleIds.isEmpty()) {
 			return;
 		}
@@ -232,10 +326,15 @@ public class NewsSyncService {
 		}
 
 		for (NewsArticle article : ordered) {
+			if (allowPause) {
+				ensureBatchNotPaused();
+			}
 			try {
-				EnrichmentResult result = enrichArticleWithRetry(article);
+				EnrichmentResult result = enrichArticleWithRetry(article, allowPause);
 				saveEnrichment(article, result);
 				counter.enriched++;
+			} catch (BatchPausedException e) {
+				throw e;
 			} catch (Exception e) {
 				logger.warn("Enrichment failed for article id={}", article.getId(), e);
 				counter.enrichmentSkipped++;
@@ -244,10 +343,21 @@ public class NewsSyncService {
 
 	}
 
+	private void ensureBatchNotPaused() {
+		batchPauseService.throwIfStopRequested();
+	}
+
 	private EnrichmentResult enrichArticleWithRetry(NewsArticle article) throws Exception {
+		return enrichArticleWithRetry(article, false);
+	}
+
+	private EnrichmentResult enrichArticleWithRetry(NewsArticle article, boolean allowPause) throws Exception {
 		int attempt = 0;
 		int safeRetryCount = Math.max(1, enrichmentRetryCount);
 		while (attempt < safeRetryCount) {
+			if (allowPause) {
+				ensureBatchNotPaused();
+			}
 			try {
 				return enrichArticleWithGroq(article);
 			} catch (HttpClientErrorException.TooManyRequests e) {
@@ -285,11 +395,14 @@ public class NewsSyncService {
 				  1. Never return "Unknown", "Not found", "N/A", "None", or similar placeholder text for country/state/city.
 				  2. Return at most one country, one state, and one city. Never return comma-separated or slash-separated location lists.
 				  3. If multiple locations are mentioned, choose the most central/relevant location for the article.
-				  4. If city is present, state and country must also be present.
-				  5. If city is absent but state is present, country must be present.
-				  6. If city and state are both absent, country must still be present.
-				  7. If the exact city or state cannot be confidently identified, return an empty string for that field, but still infer the most likely country from title/description/content/source/url.
-				  8. Do not put a city name in state, and do not put a state name in city.
+				  4. Country, state, and city must form a real geographic hierarchy. The state must belong to the country, and the city must belong to that state.
+				  5. Double-check that the state/city you provide are actually inside the country. Double hard-check that the city is actually inside the state.
+				  6. Never mix locations from different countries, such as using a foreign state or city under another country.
+				  7. If city is present, state and country must also be present.
+				  8. If city is absent but state is present, country must be present.
+				  9. If city and state are both absent, country must still be present.
+				  10. If the exact city or state cannot be confidently verified as belonging to the selected country/state, return an empty string for that field, but still infer the most likely country from title/description/content/source/url.
+				  11. Do not put a city name in state, and do not put a state name in city.
 				- Use all raw inputs, especially source and URL domain, to infer country when article text is limited.
 				- Do not include markdown, explanations, or extra keys.
 
