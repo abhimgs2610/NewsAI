@@ -1,6 +1,8 @@
 package com.newsai.news_ai_backend.controller;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,9 +20,15 @@ import com.newsai.news_ai_backend.dto.NewsFeedDto;
 import com.newsai.news_ai_backend.dto.StoryResponseDto;
 import com.newsai.news_ai_backend.service.NewsService;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 @RestController
 @RequestMapping("/api/news")
 public class NewsController {
+
+	private static final Set<String> FEED_QUERY_PARAMS = Set.of("country", "category", "state", "city", "q", "limit");
+	private static final int DEFAULT_FEED_LIMIT = 20;
+	private static final int MAX_FEED_LIMIT = 100;
 
 	private final NewsService newsService;
 
@@ -34,8 +42,14 @@ public class NewsController {
 			@RequestParam(value = "state", defaultValue = "") String state,
 			@RequestParam(value = "city", defaultValue = "") String city,
 			@RequestParam(value = "q", defaultValue = "") String query,
-			@RequestParam(value = "limit", defaultValue = "20") int limit) {
-		return ApiResponseDto.success(newsService.getFeed(country, category, state, city, query, limit));
+			@RequestParam(value = "limit", required = false) String limit,
+			HttpServletRequest request) {
+		validateFeedQueryParams(request);
+		int parsedLimit = parseLimit(rawLimitValue(request), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
+		if (parsedLimit == 0) {
+			return ApiResponseDto.success(Collections.emptyList());
+		}
+		return ApiResponseDto.success(newsService.getFeed(country, category, state, city, query, parsedLimit));
 	}
 
 	@PostMapping("/discover")
@@ -77,5 +91,64 @@ public class NewsController {
 			@RequestParam(value = "style", defaultValue = "genz") String style,
 			@RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
 		return ApiResponseDto.success(newsService.getStoryById(id, language, style, refresh), "Record fetched successfully");
+	}
+
+	private void validateFeedQueryParams(HttpServletRequest request) {
+		String rawQuery = request.getQueryString();
+		if (rawQuery != null && rawQuery.endsWith("&")) {
+			throw new IllegalArgumentException("Invalid query parameter.");
+		}
+
+		if (rawQuery != null) {
+			for (String part : rawQuery.split("&", -1)) {
+				if (part.isBlank()) {
+					throw new IllegalArgumentException("Invalid query parameter.");
+				}
+				String rawName = part.split("=", 2)[0];
+				if (!FEED_QUERY_PARAMS.contains(rawName)) {
+					throw new IllegalArgumentException("Invalid query parameter.");
+				}
+			}
+		}
+
+		for (String paramName : request.getParameterMap().keySet()) {
+			if (!FEED_QUERY_PARAMS.contains(paramName)) {
+				throw new IllegalArgumentException("Invalid query parameter.");
+			}
+		}
+	}
+
+	private String rawLimitValue(HttpServletRequest request) {
+		String rawQuery = request.getQueryString();
+		if (rawQuery == null || rawQuery.isBlank()) {
+			return null;
+		}
+		for (String part : rawQuery.split("&", -1)) {
+			String[] nameAndValue = part.split("=", 2);
+			if (nameAndValue.length == 2 && "limit".equals(nameAndValue[0])) {
+				return nameAndValue[1];
+			}
+		}
+		return null;
+	}
+
+	private int parseLimit(String rawLimit, String decodedLimit, int defaultLimit, int maxLimit) {
+		if (rawLimit == null && decodedLimit == null) {
+			return defaultLimit;
+		}
+		String valueToValidate = rawLimit == null ? decodedLimit : rawLimit;
+		if (valueToValidate == null || valueToValidate.isBlank() || !valueToValidate.matches("[0-9]+")) {
+			throw new IllegalArgumentException("limit must be an integer.");
+		}
+		int parsedLimit;
+		try {
+			parsedLimit = Integer.parseInt(valueToValidate);
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException("limit must be an integer.", e);
+		}
+		if (parsedLimit > maxLimit) {
+			throw new IllegalArgumentException("limit exceeds maximum allowed value.");
+		}
+		return parsedLimit;
 	}
 }
