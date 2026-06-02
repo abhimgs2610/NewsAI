@@ -29,7 +29,7 @@ public class OpenAiClient {
 	private String url;
 
 	public String generateStory(String prompt) {
-		return generateCompletion(prompt, 0.25, 1200);
+		return generateCompletion(prompt, 0.25, 3200);
 	}
 
 	public String generateEnrichment(String prompt) {
@@ -88,3 +88,5 @@ public class OpenAiClient {
 		}
 	}
 }
+
+

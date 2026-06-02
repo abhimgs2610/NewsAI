@@ -27,8 +27,12 @@ import jakarta.servlet.http.HttpServletRequest;
 public class NewsController {
 
 	private static final Set<String> FEED_QUERY_PARAMS = Set.of("country", "category", "state", "city", "q", "limit");
+	private static final Set<String> HOT_QUERY_PARAMS = Set.of("q", "limit");
+	private static final Set<String> DISCOVER_QUERY_PARAMS = Set.of("limit");
 	private static final int DEFAULT_FEED_LIMIT = 20;
+	private static final int DEFAULT_DISCOVER_LIMIT = 10;
 	private static final int MAX_FEED_LIMIT = 100;
+	private static final int MAX_DISCOVER_LIMIT = 20;
 
 	private final NewsService newsService;
 
@@ -44,8 +48,8 @@ public class NewsController {
 			@RequestParam(value = "q", defaultValue = "") String query,
 			@RequestParam(value = "limit", required = false) String limit,
 			HttpServletRequest request) {
-		validateFeedQueryParams(request);
-		int parsedLimit = parseLimit(rawLimitValue(request), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
+		validateQueryParams(request, FEED_QUERY_PARAMS);
+		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
 		if (parsedLimit == 0) {
 			return ApiResponseDto.success(Collections.emptyList());
 		}
@@ -53,16 +57,30 @@ public class NewsController {
 	}
 
 	@PostMapping("/discover")
-	public ApiResponseDto<NewsDiscoveryResponseDto> discoverNews(@RequestBody NewsDiscoveryRequestDto request,
-			@RequestParam(value = "limit", defaultValue = "10") int limit) {
-		NewsDiscoveryResponseDto response = newsService.discoverNews(request, limit);
+	public ApiResponseDto<NewsDiscoveryResponseDto> discoverNews(@RequestBody NewsDiscoveryRequestDto requestBody,
+			@RequestParam(value = "limit", required = false) String limit,
+			HttpServletRequest request) {
+		validateQueryParams(request, DISCOVER_QUERY_PARAMS);
+		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_DISCOVER_LIMIT, MAX_DISCOVER_LIMIT);
+		if (parsedLimit == 0) {
+			NewsDiscoveryResponseDto emptyResponse = new NewsDiscoveryResponseDto("NO_MATCH_FOUND",
+					"No records requested.", "", Collections.emptyList());
+			return ApiResponseDto.success(emptyResponse, 0);
+		}
+		NewsDiscoveryResponseDto response = newsService.discoverNews(requestBody, parsedLimit);
 		return ApiResponseDto.success(response, response.getResults() == null ? 0 : response.getResults().size());
 	}
 
 	@GetMapping("/hot")
 	public ApiResponseDto<List<NewsFeedDto>> getHotNews(@RequestParam(value = "q", defaultValue = "") String query,
-			@RequestParam(value = "limit", defaultValue = "20") int limit) {
-		return ApiResponseDto.success(newsService.getHotNews(query, limit));
+			@RequestParam(value = "limit", required = false) String limit,
+			HttpServletRequest request) {
+		validateQueryParams(request, HOT_QUERY_PARAMS);
+		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
+		if (parsedLimit == 0) {
+			return ApiResponseDto.success(Collections.emptyList());
+		}
+		return ApiResponseDto.success(newsService.getHotNews(query, parsedLimit));
 	}
 
 	@GetMapping("/countries")
@@ -93,7 +111,7 @@ public class NewsController {
 		return ApiResponseDto.success(newsService.getStoryById(id, language, style, refresh), "Record fetched successfully");
 	}
 
-	private void validateFeedQueryParams(HttpServletRequest request) {
+	private void validateQueryParams(HttpServletRequest request, Set<String> allowedParams) {
 		String rawQuery = request.getQueryString();
 		if (rawQuery != null && rawQuery.endsWith("&")) {
 			throw new IllegalArgumentException("Invalid query parameter.");
@@ -105,27 +123,27 @@ public class NewsController {
 					throw new IllegalArgumentException("Invalid query parameter.");
 				}
 				String rawName = part.split("=", 2)[0];
-				if (!FEED_QUERY_PARAMS.contains(rawName)) {
+				if (!allowedParams.contains(rawName)) {
 					throw new IllegalArgumentException("Invalid query parameter.");
 				}
 			}
 		}
 
 		for (String paramName : request.getParameterMap().keySet()) {
-			if (!FEED_QUERY_PARAMS.contains(paramName)) {
+			if (!allowedParams.contains(paramName)) {
 				throw new IllegalArgumentException("Invalid query parameter.");
 			}
 		}
 	}
 
-	private String rawLimitValue(HttpServletRequest request) {
+	private String rawQueryValue(HttpServletRequest request, String name) {
 		String rawQuery = request.getQueryString();
 		if (rawQuery == null || rawQuery.isBlank()) {
 			return null;
 		}
 		for (String part : rawQuery.split("&", -1)) {
 			String[] nameAndValue = part.split("=", 2);
-			if (nameAndValue.length == 2 && "limit".equals(nameAndValue[0])) {
+			if (nameAndValue.length == 2 && name.equals(nameAndValue[0])) {
 				return nameAndValue[1];
 			}
 		}
