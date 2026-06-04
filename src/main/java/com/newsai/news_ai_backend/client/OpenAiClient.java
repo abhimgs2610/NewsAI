@@ -29,11 +29,15 @@ public class OpenAiClient {
 	private String url;
 
 	public String generateStory(String prompt) {
-		return generateCompletion(prompt, 0.25, 1200);
+		return generateCompletion(prompt, 0.45, 3200);
 	}
 
 	public String generateEnrichment(String prompt) {
 		return generateCompletion(prompt, 0.1, 320);
+	}
+
+	public String generateFollowUpAnswer(String prompt) {
+		return generateCompletion(prompt, 0.4, 1000);
 	}
 
 	private String generateCompletion(String prompt, double temperature, int maxTokens) {

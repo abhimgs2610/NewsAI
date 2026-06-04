@@ -1,6 +1,7 @@
--- Clean rebuild SQL for the 3-table pipeline.
+-- Clean rebuild SQL for the NewsAI pipeline.
 -- Use this in local MySQL before starting app with spring.jpa.hibernate.ddl-auto=validate.
 
+DROP TABLE IF EXISTS news_chat_message;
 DROP TABLE IF EXISTS news_story;
 DROP TABLE IF EXISTS news_ai_enrichment;
 DROP TABLE IF EXISTS news_article;
@@ -14,7 +15,9 @@ CREATE TABLE news_article (
 	source VARCHAR(255),
 	provider VARCHAR(255),
 	image_url VARCHAR(1000),
-	published_at DATE
+	published_at DATE,
+	extracted_content LONGTEXT,
+	extracted_at DATETIME(6)
 );
 
 CREATE INDEX idx_news_article_published_at ON news_article (published_at);
@@ -56,3 +59,16 @@ CREATE TABLE news_story (
 
 CREATE INDEX idx_news_story_article_style_language
 	ON news_story (news_article_id, style, language);
+
+CREATE TABLE news_chat_message (
+	id BIGINT PRIMARY KEY AUTO_INCREMENT,
+	news_article_id BIGINT NOT NULL,
+	question LONGTEXT,
+	answer LONGTEXT,
+	asked_at DATETIME(6),
+	CONSTRAINT fk_news_chat_message_article
+		FOREIGN KEY (news_article_id) REFERENCES news_article(id)
+);
+
+CREATE INDEX idx_news_chat_article_asked
+	ON news_chat_message (news_article_id, asked_at);

@@ -1,6 +1,7 @@
 package com.newsai.news_ai_backend.model;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -43,6 +44,12 @@ public class NewsArticle {
 
 	@Column(name = "published_at")
 	private LocalDate publishedAt;
+
+	@Column(name = "extracted_content", columnDefinition = "LONGTEXT")
+	private String extractedContent;
+
+	@Column(name = "extracted_at")
+	private LocalDateTime extractedAt;
 
 	public Long getId() {
 		return id;
@@ -114,5 +121,21 @@ public class NewsArticle {
 
 	public void setPublishedAt(LocalDate publishedAt) {
 		this.publishedAt = publishedAt;
+	}
+
+	public String getExtractedContent() {
+		return extractedContent;
+	}
+
+	public void setExtractedContent(String extractedContent) {
+		this.extractedContent = extractedContent;
+	}
+
+	public LocalDateTime getExtractedAt() {
+		return extractedAt;
+	}
+
+	public void setExtractedAt(LocalDateTime extractedAt) {
+		this.extractedAt = extractedAt;
 	}
 }

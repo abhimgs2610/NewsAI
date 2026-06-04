@@ -3,6 +3,8 @@ package com.newsai.news_ai_backend.service;
 import java.util.List;
 
 import com.newsai.news_ai_backend.dto.CountryCountDto;
+import com.newsai.news_ai_backend.dto.NewsAskRequestDto;
+import com.newsai.news_ai_backend.dto.NewsAskResponseDto;
 import com.newsai.news_ai_backend.dto.NewsDiscoveryRequestDto;
 import com.newsai.news_ai_backend.dto.NewsDiscoveryResponseDto;
 import com.newsai.news_ai_backend.dto.NewsFeedDto;
@@ -25,5 +27,8 @@ public interface NewsService {
 	List<String> getCities(String state);
 
 	StoryResponseDto getStoryById(Long id, String language, String style, boolean refresh);
+
+	NewsAskResponseDto askNewsQuestion(Long id, NewsAskRequestDto request);
 }
+
 
