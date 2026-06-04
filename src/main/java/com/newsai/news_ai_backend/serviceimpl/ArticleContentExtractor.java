@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -57,6 +58,10 @@ public class ArticleContentExtractor {
 			Document document = Jsoup.connect(url)
 					.userAgent(USER_AGENT)
 					.referrer("https://www.google.com/")
+					.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+					.header("Accept-Language", "en-US,en;q=0.9")
+					.header("DNT", "1")
+					.header("Upgrade-Insecure-Requests", "1")
 					.ignoreContentType(true)
 					.followRedirects(true)
 					.timeout((int) Duration.ofSeconds(12).toMillis())
@@ -75,6 +80,9 @@ public class ArticleContentExtractor {
 			}
 
 			return extractedText;
+		} catch (HttpStatusException e) {
+			logger.warn("Could not extract article text from URL: {}. HTTP status={}", url, e.getStatusCode());
+			return "";
 		} catch (Exception e) {
 			logger.warn("Could not extract article text from URL: {}", url, e);
 			return "";
@@ -196,3 +204,4 @@ public class ArticleContentExtractor {
 		return text.substring(0, maxLength).trim();
 	}
 }
+

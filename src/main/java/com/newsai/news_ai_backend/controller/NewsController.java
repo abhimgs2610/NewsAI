@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.newsai.news_ai_backend.dto.ApiResponseDto;
 import com.newsai.news_ai_backend.dto.CountryCountDto;
+import com.newsai.news_ai_backend.dto.NewsAskRequestDto;
+import com.newsai.news_ai_backend.dto.NewsAskResponseDto;
 import com.newsai.news_ai_backend.dto.NewsDiscoveryRequestDto;
 import com.newsai.news_ai_backend.dto.NewsDiscoveryResponseDto;
 import com.newsai.news_ai_backend.dto.NewsFeedDto;
@@ -109,6 +111,12 @@ public class NewsController {
 			@RequestParam(value = "style", defaultValue = "genz") String style,
 			@RequestParam(value = "refresh", defaultValue = "false") boolean refresh) {
 		return ApiResponseDto.success(newsService.getStoryById(id, language, style, refresh), "Record fetched successfully");
+	}
+
+	@PostMapping("/{id}/ask")
+	public ApiResponseDto<NewsAskResponseDto> askNewsQuestion(@PathVariable Long id,
+			@RequestBody NewsAskRequestDto requestBody) {
+		return ApiResponseDto.success(newsService.askNewsQuestion(id, requestBody), "Record fetched successfully");
 	}
 
 	private void validateQueryParams(HttpServletRequest request, Set<String> allowedParams) {
