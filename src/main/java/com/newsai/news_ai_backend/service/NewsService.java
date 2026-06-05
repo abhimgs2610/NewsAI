@@ -14,7 +14,7 @@ public interface NewsService {
 
 	List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit);
 
-	NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request, int limit);
+	NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request);
 
 	List<NewsFeedDto> getHotNews(String query, int limit);
 
