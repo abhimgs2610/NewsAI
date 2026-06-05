@@ -431,4 +431,4 @@ Backend v1 is feature-complete for the current product plan:
 - Batch scheduling and pause control are implemented.
 - API documentation is available.
 
-Next major step: build the frontend experience.
+Next major step: build the frontend experience from scratch.
