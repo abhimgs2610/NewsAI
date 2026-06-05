@@ -30,11 +30,9 @@ public class NewsController {
 
 	private static final Set<String> FEED_QUERY_PARAMS = Set.of("country", "category", "state", "city", "q", "limit");
 	private static final Set<String> HOT_QUERY_PARAMS = Set.of("q", "limit");
-	private static final Set<String> DISCOVER_QUERY_PARAMS = Set.of("limit");
+	private static final Set<String> DISCOVER_QUERY_PARAMS = Set.of();
 	private static final int DEFAULT_FEED_LIMIT = 20;
-	private static final int DEFAULT_DISCOVER_LIMIT = 10;
 	private static final int MAX_FEED_LIMIT = 100;
-	private static final int MAX_DISCOVER_LIMIT = 20;
 
 	private final NewsService newsService;
 
@@ -60,17 +58,11 @@ public class NewsController {
 
 	@PostMapping("/discover")
 	public ApiResponseDto<NewsDiscoveryResponseDto> discoverNews(@RequestBody NewsDiscoveryRequestDto requestBody,
-			@RequestParam(value = "limit", required = false) String limit,
 			HttpServletRequest request) {
 		validateQueryParams(request, DISCOVER_QUERY_PARAMS);
-		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_DISCOVER_LIMIT, MAX_DISCOVER_LIMIT);
-		if (parsedLimit == 0) {
-			NewsDiscoveryResponseDto emptyResponse = new NewsDiscoveryResponseDto("NO_MATCH_FOUND",
-					"No records requested.", "", Collections.emptyList());
-			return ApiResponseDto.success(emptyResponse, 0);
-		}
-		NewsDiscoveryResponseDto response = newsService.discoverNews(requestBody, parsedLimit);
-		return ApiResponseDto.success(response, response.getResults() == null ? 0 : response.getResults().size());
+		NewsDiscoveryResponseDto response = newsService.discoverNews(requestBody);
+		return ApiResponseDto.success(response, response.getResults() == null ? 0 : response.getResults().size(),
+				response.getMessage());
 	}
 
 	@GetMapping("/hot")

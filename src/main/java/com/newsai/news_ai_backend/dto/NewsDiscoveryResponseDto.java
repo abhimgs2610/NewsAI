@@ -4,10 +4,13 @@ import java.util.List;
 
 public class NewsDiscoveryResponseDto {
 
+	private String discoverRequestId;
 	private String status;
 	private String message;
 	private String providerQuery;
 	private List<NewsFeedDto> results;
+	private boolean hasMore;
+	private int readyCount;
 
 	public NewsDiscoveryResponseDto() {
 	}
@@ -17,6 +20,14 @@ public class NewsDiscoveryResponseDto {
 		this.message = message;
 		this.providerQuery = providerQuery;
 		this.results = results;
+	}
+
+	public String getDiscoverRequestId() {
+		return discoverRequestId;
+	}
+
+	public void setDiscoverRequestId(String discoverRequestId) {
+		this.discoverRequestId = discoverRequestId;
 	}
 
 	public String getStatus() {
@@ -49,5 +60,21 @@ public class NewsDiscoveryResponseDto {
 
 	public void setResults(List<NewsFeedDto> results) {
 		this.results = results;
+	}
+
+	public boolean isHasMore() {
+		return hasMore;
+	}
+
+	public void setHasMore(boolean hasMore) {
+		this.hasMore = hasMore;
+	}
+
+	public int getReadyCount() {
+		return readyCount;
+	}
+
+	public void setReadyCount(int readyCount) {
+		this.readyCount = readyCount;
 	}
 }

@@ -2,10 +2,20 @@ package com.newsai.news_ai_backend.dto;
 
 public class NewsDiscoveryRequestDto {
 
+	private String discoverRequestId;
 	private String context;
 	private String country;
 	private String state;
 	private String city;
+	private boolean loadMore;
+
+	public String getDiscoverRequestId() {
+		return discoverRequestId;
+	}
+
+	public void setDiscoverRequestId(String discoverRequestId) {
+		this.discoverRequestId = discoverRequestId;
+	}
 
 	public String getContext() {
 		return context;
@@ -37,5 +47,13 @@ public class NewsDiscoveryRequestDto {
 
 	public void setCity(String city) {
 		this.city = city;
+	}
+
+	public boolean isLoadMore() {
+		return loadMore;
+	}
+
+	public void setLoadMore(boolean loadMore) {
+		this.loadMore = loadMore;
 	}
 }

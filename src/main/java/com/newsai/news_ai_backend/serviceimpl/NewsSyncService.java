@@ -140,7 +140,7 @@ public class NewsSyncService {
 		return enrichmentRepository.save(enrichment);
 	}
 
-	public List<NewsAiEnrichment> discoverFromProviders(String query, String country, String state, String city, int limit) {
+	public List<NewsArticle> fetchDiscoveryCandidateArticles(String query, String country, int limit) {
 		String cleanedQuery = query == null ? "" : query.trim();
 		if (cleanedQuery.isBlank()) {
 			return List.of();
@@ -167,6 +167,25 @@ public class NewsSyncService {
 			logger.warn("GNews discovery search failed for query={}", cleanedQuery, e);
 		}
 
+		if (candidateArticleIds.isEmpty()) {
+			return List.of();
+		}
+		List<Long> orderedIds = new ArrayList<>(candidateArticleIds);
+		List<NewsArticle> articles = articleRepository.findByIdIn(orderedIds);
+		List<NewsArticle> ordered = new ArrayList<>();
+		for (Long id : orderedIds) {
+			articles.stream().filter(article -> article.getId().equals(id)).findFirst().ifPresent(ordered::add);
+		}
+		return ordered;
+	}
+
+	public List<NewsAiEnrichment> discoverFromProviders(String query, String country, String state, String city, int limit) {
+		List<NewsArticle> candidates = fetchDiscoveryCandidateArticles(query, country, limit);
+		SyncCounter counter = new SyncCounter();
+		Set<Long> candidateArticleIds = new LinkedHashSet<>();
+		for (NewsArticle article : candidates) {
+			candidateArticleIds.add(article.getId());
+		}
 		enrichArticles(candidateArticleIds, counter, false);
 		if (candidateArticleIds.isEmpty()) {
 			return List.of();

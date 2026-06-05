@@ -3,6 +3,7 @@ package com.newsai.news_ai_backend.serviceimpl;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -18,11 +19,15 @@ import com.newsai.news_ai_backend.dto.StoryResponseDto;
 import com.newsai.news_ai_backend.model.NewsAiEnrichment;
 import com.newsai.news_ai_backend.model.NewsArticle;
 import com.newsai.news_ai_backend.model.NewsChatMessage;
+import com.newsai.news_ai_backend.model.NewsDiscoverRequest;
+import com.newsai.news_ai_backend.model.NewsDiscoverResult;
 import com.newsai.news_ai_backend.model.NewsStory;
 import com.newsai.news_ai_backend.model.StoryLanguage;
 import com.newsai.news_ai_backend.repository.NewsAiEnrichmentRepository;
 import com.newsai.news_ai_backend.repository.NewsArticleRepository;
 import com.newsai.news_ai_backend.repository.NewsChatMessageRepository;
+import com.newsai.news_ai_backend.repository.NewsDiscoverRequestRepository;
+import com.newsai.news_ai_backend.repository.NewsDiscoverResultRepository;
 import com.newsai.news_ai_backend.repository.NewsStoryRepository;
 import com.newsai.news_ai_backend.service.NewsService;
 import com.newsai.news_ai_backend.service.StoryGenerator;
@@ -37,27 +42,37 @@ public class NewsServiceImpl implements NewsService {
 	private static final int FOLLOW_UP_HISTORY_LIMIT = 12000;
 	private static final int FOLLOW_UP_HISTORY_ENTRY_LIMIT = 2000;
 	private static final int ARTICLE_CONTEXT_FALLBACK_LIMIT = 12000;
+	private static final int DISCOVER_PAGE_SIZE = 5;
+	private static final long DISCOVER_INITIAL_WAIT_MS = 5000L;
+	private static final long DISCOVER_INITIAL_WAIT_POLL_MS = 250L;
 
 	private final NewsAiEnrichmentRepository enrichmentRepository;
 	private final NewsArticleRepository articleRepository;
 	private final NewsStoryRepository storyRepository;
 	private final NewsChatMessageRepository chatMessageRepository;
+	private final NewsDiscoverRequestRepository discoverRequestRepository;
+	private final NewsDiscoverResultRepository discoverResultRepository;
 	private final StoryGenerator storyGenerator;
 	private final ArticleContentExtractor articleContentExtractor;
 	private final NewsSyncService newsSyncService;
+	private final NewsDiscoveryBackgroundService discoveryBackgroundService;
 	private final OpenAiClient openAiClient;
 
 	public NewsServiceImpl(NewsAiEnrichmentRepository enrichmentRepository, NewsArticleRepository articleRepository,
 			NewsStoryRepository storyRepository, NewsChatMessageRepository chatMessageRepository,
+			NewsDiscoverRequestRepository discoverRequestRepository, NewsDiscoverResultRepository discoverResultRepository,
 			StoryGenerator storyGenerator, ArticleContentExtractor articleContentExtractor, NewsSyncService newsSyncService,
-			OpenAiClient openAiClient) {
+			NewsDiscoveryBackgroundService discoveryBackgroundService, OpenAiClient openAiClient) {
 		this.enrichmentRepository = enrichmentRepository;
 		this.articleRepository = articleRepository;
 		this.storyRepository = storyRepository;
 		this.chatMessageRepository = chatMessageRepository;
+		this.discoverRequestRepository = discoverRequestRepository;
+		this.discoverResultRepository = discoverResultRepository;
 		this.storyGenerator = storyGenerator;
 		this.articleContentExtractor = articleContentExtractor;
 		this.newsSyncService = newsSyncService;
+		this.discoveryBackgroundService = discoveryBackgroundService;
 		this.openAiClient = openAiClient;
 	}
 
@@ -72,46 +87,146 @@ public class NewsServiceImpl implements NewsService {
 	}
 
 	@Override
-	public NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request, int limit) {
-		String context = clean(request == null ? "" : request.getContext());
+	public NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request) {
+		if (request == null) {
+			throw new IllegalArgumentException("request body is required");
+		}
+		if (request.isLoadMore()) {
+			return loadMoreDiscoverResults(request);
+		}
+		return startDiscoverRequest(request);
+	}
+
+	private NewsDiscoveryResponseDto startDiscoverRequest(NewsDiscoveryRequestDto request) {
+		String context = clean(request.getContext());
 		if (context.isBlank()) {
 			throw new IllegalArgumentException("context is required");
 		}
 
-		int safeLimit = Math.max(1, Math.min(limit, 20));
 		String country = clean(request.getCountry());
 		String state = clean(request.getState());
 		String city = clean(request.getCity());
 		String providerQuery = buildProviderQuery(city, state, country, context);
 
-		List<NewsAiEnrichment> enrichedMatches = enrichmentRepository
-				.findFeed("", "", "", "", context, PageRequest.of(0, safeLimit))
+		NewsDiscoverRequest discoverRequest = new NewsDiscoverRequest();
+		discoverRequest.setRequestKey("DISC-" + UUID.randomUUID());
+		discoverRequest.setContext(context);
+		discoverRequest.setCountry(country);
+		discoverRequest.setState(state);
+		discoverRequest.setCity(city);
+		discoverRequest.setProviderQuery(providerQuery);
+		discoverRequest.setStatus("PROCESSING");
+		discoverRequest.setCreatedAt(LocalDateTime.now());
+		discoverRequest.setUpdatedAt(LocalDateTime.now());
+		discoverRequest = discoverRequestRepository.save(discoverRequest);
+
+		List<NewsAiEnrichment> localMatches = enrichmentRepository
+				.findFeed(country, "", state, city, context, PageRequest.of(0, DISCOVER_PAGE_SIZE))
 				.stream()
 				.map(enrichment -> newsSyncService.applyDiscoveryLocationOverrides(enrichment, country, state, city))
 				.toList();
-		if (!enrichedMatches.isEmpty()) {
-			return discoveryResponse("FOUND_EXISTING_ENRICHED", "Found matching news from existing enriched articles.",
-					providerQuery, enrichedMatches);
-		}
+		saveDiscoverResults(discoverRequest, localMatches, 1);
 
-		articleRepository.findRawMatches(context, PageRequest.of(0, safeLimit))
-				.forEach(article -> newsSyncService.enrichArticleForDiscovery(article, country, state, city));
-		List<NewsAiEnrichment> rawMatches = enrichmentRepository
-				.findFeed(country, "", state, city, context, PageRequest.of(0, safeLimit));
-		if (!rawMatches.isEmpty()) {
-			return discoveryResponse("FOUND_RAW_AND_ENRICHED",
-					"Found matching raw news locally and enriched it.", providerQuery, rawMatches);
-		}
+		discoveryBackgroundService.processDiscoverRequest(discoverRequest.getId());
+		waitForInitialDiscoverResults(discoverRequest.getId());
+		discoverRequest = discoverRequestRepository.findById(discoverRequest.getId()).orElse(discoverRequest);
+		return buildDiscoverResponse(discoverRequest, discoverRequest.getStatus());
+	}
 
-		List<NewsAiEnrichment> fetchedMatches = newsSyncService.discoverFromProviders(providerQuery, country, state, city,
-				safeLimit);
-		if (!fetchedMatches.isEmpty()) {
-			return discoveryResponse("FETCHED_FROM_PROVIDERS",
-					"Fetched matching news from providers and enriched available articles.", providerQuery, fetchedMatches);
+	private void waitForInitialDiscoverResults(Long discoverRequestId) {
+		long deadline = System.currentTimeMillis() + DISCOVER_INITIAL_WAIT_MS;
+		while (System.currentTimeMillis() < deadline) {
+			long readyCount = discoverResultRepository.countByDiscoverRequestIdAndSentToUserFalse(discoverRequestId);
+			if (readyCount >= DISCOVER_PAGE_SIZE) {
+				return;
+			}
+			String status = discoverRequestRepository.findById(discoverRequestId)
+					.map(NewsDiscoverRequest::getStatus)
+					.orElse("COMPLETED");
+			if (!"PROCESSING".equalsIgnoreCase(status)) {
+				return;
+			}
+			try {
+				Thread.sleep(DISCOVER_INITIAL_WAIT_POLL_MS);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return;
+			}
 		}
+	}
+	private NewsDiscoveryResponseDto loadMoreDiscoverResults(NewsDiscoveryRequestDto request) {
+		String requestKey = clean(request.getDiscoverRequestId());
+		if (requestKey.isBlank()) {
+			throw new IllegalArgumentException("discoverRequestId is required for loadMore");
+		}
+		NewsDiscoverRequest discoverRequest = discoverRequestRepository.findByRequestKey(requestKey)
+				.orElseThrow(() -> new IllegalArgumentException("discoverRequestId is invalid"));
+		return buildDiscoverResponse(discoverRequest, discoverRequest.getStatus());
+	}
 
-		return new NewsDiscoveryResponseDto("NO_MATCH_FOUND",
-				"No matching news found locally or from providers.", providerQuery, List.of());
+	private void saveDiscoverResults(NewsDiscoverRequest request, List<NewsAiEnrichment> enrichments, int startOrder) {
+		int displayOrder = startOrder;
+		for (NewsAiEnrichment enrichment : enrichments) {
+			NewsArticle article = enrichment.getNewsArticle();
+			if (article == null || article.getId() == null) {
+				continue;
+			}
+			if (discoverResultRepository.findByDiscoverRequestIdAndNewsArticleId(request.getId(), article.getId()).isPresent()) {
+				continue;
+			}
+			NewsDiscoverResult result = new NewsDiscoverResult();
+			result.setDiscoverRequest(request);
+			result.setNewsArticle(article);
+			result.setDisplayOrder(displayOrder++);
+			result.setSentToUser(false);
+			result.setCreatedAt(LocalDateTime.now());
+			discoverResultRepository.save(result);
+		}
+	}
+
+	private NewsDiscoveryResponseDto buildDiscoverResponse(NewsDiscoverRequest discoverRequest, String status) {
+		List<NewsDiscoverResult> readyResults = discoverResultRepository
+				.findReadyUnsent(discoverRequest.getId(), PageRequest.of(0, DISCOVER_PAGE_SIZE));
+		List<Long> articleIds = readyResults.stream()
+				.map(result -> result.getNewsArticle().getId())
+				.toList();
+		List<NewsAiEnrichment> enrichments = articleIds.isEmpty() ? List.of()
+				: enrichmentRepository.findByArticleIdsWithArticle(articleIds);
+		List<NewsFeedDto> feedResults = articleIds.stream()
+				.map(articleId -> enrichments.stream()
+						.filter(enrichment -> enrichment.getNewsArticle().getId().equals(articleId))
+						.findFirst()
+						.orElse(null))
+				.filter(enrichment -> enrichment != null)
+				.map(this::toFeedDto)
+				.toList();
+		readyResults.forEach(result -> result.setSentToUser(true));
+		discoverResultRepository.saveAll(readyResults);
+
+		long remainingReady = discoverResultRepository.countByDiscoverRequestIdAndSentToUserFalse(discoverRequest.getId());
+		String finalStatus = clean(status).isBlank() ? "PROCESSING" : status;
+		boolean hasMore = remainingReady > 0 || "PROCESSING".equalsIgnoreCase(finalStatus);
+		String message = discoverMessage(finalStatus, feedResults.size());
+
+		NewsDiscoveryResponseDto response = new NewsDiscoveryResponseDto(finalStatus, message,
+				discoverRequest.getProviderQuery(), feedResults);
+		response.setDiscoverRequestId(discoverRequest.getRequestKey());
+		response.setHasMore(hasMore);
+		response.setReadyCount(feedResults.size());
+		return response;
+	}
+
+	private String discoverMessage(String status, int resultCount) {
+		if (resultCount > 0) {
+			return "Records fetched successfully";
+		}
+		if ("PROCESSING".equalsIgnoreCase(status)) {
+			return "Processing is still in progress.";
+		}
+		if ("FAILED".equalsIgnoreCase(status)) {
+			return "Discover processing failed. Please try again.";
+		}
+		return "No more matching news found.";
 	}
 
 	@Override

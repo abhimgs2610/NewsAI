@@ -563,13 +563,13 @@ Notes:
 ## 22. Discover News
 
 ```http
-POST /api/news/discover?limit=2
+POST /api/news/discover
 ```
 
 Example:
 
 ```text
-http://localhost:8080/api/news/discover?limit=2
+http://localhost:8080/api/news/discover
 ```
 
 Payload:
@@ -579,7 +579,8 @@ Payload:
   "context": "History of Ramayana",
   "country": "",
   "state": "",
-  "city": ""
+  "city": "",
+  "loadMore": false
 }
 ```
 
@@ -588,25 +589,28 @@ Response:
 ```json
 {
   "data": {
-    "status": "FETCHED_FROM_PROVIDERS",
-    "message": "Fetched matching news from providers and enriched available articles.",
+    "discoverRequestId": "DISC-example-id",
+    "status": "PROCESSING",
+    "message": "Records fetched successfully",
     "providerQuery": "History of Ramayana",
     "results": [
       {
         "id": 4569,
         "headline": "Ramayana: Ranbir Kapoor's magnum opus creates history",
-        "briefStory": "Ramayana is already being hailed as the grandest cinematic spectacle of 2026, with anticipation reaching a fever pitch worldwide.",
+        "briefStory": "Ramayana is already being hailed as the grandest cinematic spectacle of 2026.",
         "category": "Entertainment",
         "source": "Firstpost",
-        "imageUrl": "https://images.firstpost.com/uploads/2026/05/Ramayana-1-2026-05-1da23f51f4099d52ed70e8b40d334e7e.jpg?im=FitAndFill=(1200,675)",
+        "imageUrl": "https://images.firstpost.com/example.jpg",
         "country": "India",
         "state": "",
         "city": "",
         "publishedAt": "2026-05-19"
       }
-    ]
+    ],
+    "hasMore": true,
+    "readyCount": 1
   },
-  "count": 2,
+  "count": 1,
   "responseCode": 200,
   "responseMessage": "Records fetched successfully",
   "error": false
@@ -615,10 +619,10 @@ Response:
 
 Notes:
 - Used for "Could not find the news?" flow.
-- `context` is mandatory.
+- `context` is mandatory for the first request.
 - `country`, `state`, and `city` are optional.
-- If matching news exists locally, it can return local results.
-- If not enough local matches exist, it calls NewsAPI/GNews providers, saves articles, enriches them, and returns available enriched results.
+- If matching news exists locally, it can return local results immediately.
+- Provider fetch and extra enrichment run in the background after the first response.
 
 ## Frontend Usage Flow
 
@@ -634,5 +638,21 @@ Suggested app flow:
 5. Show hot news from `GET /api/news/hot?limit=20`.
 6. Open detail/story page with `GET /api/news/{id}?language=ENGLISH&style=genz&refresh=false`.
 7. Use story chat with `POST /api/news/{id}/ask`.
-8. Use discover flow with `POST /api/news/discover?limit=10` when the user cannot find a news item.
+8. Use discover flow with `POST /api/news/discover` when the user cannot find a news item.
 
+
+Updated discover behavior:
+- Do not pass `limit`; backend returns max 5 ready results per call.
+- First request creates `discoverRequestId`, starts background provider fetch/enrichment, waits up to 5 seconds for initial ready results, then returns max 5.
+- Use the same endpoint for load more with `loadMore=true` and `discoverRequestId`.
+- Load more returns max 5 ready unsent results immediately. If only 1, 2, 3, or 4 are ready, it returns those.
+- If no result is ready yet and background work is still running, status is `PROCESSING`, results are empty, and `hasMore=true`.
+
+Load more payload:
+
+```json
+{
+  "discoverRequestId": "DISC-example-id",
+  "loadMore": true
+}
+```
