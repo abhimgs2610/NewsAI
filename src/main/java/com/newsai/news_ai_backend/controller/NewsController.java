@@ -28,8 +28,9 @@ import jakarta.servlet.http.HttpServletRequest;
 @RequestMapping("/api/news")
 public class NewsController {
 
-	private static final Set<String> FEED_QUERY_PARAMS = Set.of("country", "category", "state", "city", "q", "limit");
-	private static final Set<String> HOT_QUERY_PARAMS = Set.of("q", "limit");
+	private static final Set<String> FEED_QUERY_PARAMS = Set.of("country", "category", "state", "city", "q", "limit",
+			"offset", "searchValue");
+	private static final Set<String> HOT_QUERY_PARAMS = Set.of("q", "limit", "offset");
 	private static final Set<String> DISCOVER_QUERY_PARAMS = Set.of();
 	private static final int DEFAULT_FEED_LIMIT = 20;
 	private static final int MAX_FEED_LIMIT = 100;
@@ -41,19 +42,29 @@ public class NewsController {
 	}
 
 	@GetMapping("/feed")
-	public ApiResponseDto<List<NewsFeedDto>> getFeed(@RequestParam(value = "country", defaultValue = "") String country,
+	public ApiResponseDto<List<NewsFeedDto>> getFeed(@RequestParam(value = "country", defaultValue = "India") String country,
 			@RequestParam(value = "category", defaultValue = "") String category,
 			@RequestParam(value = "state", defaultValue = "") String state,
 			@RequestParam(value = "city", defaultValue = "") String city,
 			@RequestParam(value = "q", defaultValue = "") String query,
 			@RequestParam(value = "limit", required = false) String limit,
+			@RequestParam(value = "offset", required = false) String offset,
+			@RequestParam(value = "searchValue", required = false) String searchValue,
 			HttpServletRequest request) {
 		validateQueryParams(request, FEED_QUERY_PARAMS);
 		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
+		int parsedOffset = parseOffset(rawQueryValue(request, "offset"), offset);
+		boolean globalSearch = parseBoolean(rawQueryValue(request, "searchValue"), searchValue, false, "searchValue");
 		if (parsedLimit == 0) {
 			return ApiResponseDto.success(Collections.emptyList());
 		}
-		return ApiResponseDto.success(newsService.getFeed(country, category, state, city, query, parsedLimit));
+		String effectiveCountry = globalSearch ? "" : country;
+		String effectiveCategory = globalSearch ? "" : category;
+		String effectiveState = globalSearch ? "" : state;
+		String effectiveCity = globalSearch ? "" : city;
+		return ApiResponseDto
+				.success(newsService.getFeed(effectiveCountry, effectiveCategory, effectiveState, effectiveCity, query,
+						parsedLimit, parsedOffset));
 	}
 
 	@PostMapping("/discover")
@@ -68,13 +79,15 @@ public class NewsController {
 	@GetMapping("/hot")
 	public ApiResponseDto<List<NewsFeedDto>> getHotNews(@RequestParam(value = "q", defaultValue = "") String query,
 			@RequestParam(value = "limit", required = false) String limit,
+			@RequestParam(value = "offset", required = false) String offset,
 			HttpServletRequest request) {
 		validateQueryParams(request, HOT_QUERY_PARAMS);
 		int parsedLimit = parseLimit(rawQueryValue(request, "limit"), limit, DEFAULT_FEED_LIMIT, MAX_FEED_LIMIT);
+		int parsedOffset = parseOffset(rawQueryValue(request, "offset"), offset);
 		if (parsedLimit == 0) {
 			return ApiResponseDto.success(Collections.emptyList());
 		}
-		return ApiResponseDto.success(newsService.getHotNews(query, parsedLimit));
+		return ApiResponseDto.success(newsService.getHotNews(query, parsedLimit, parsedOffset));
 	}
 
 	@GetMapping("/countries")
@@ -168,5 +181,37 @@ public class NewsController {
 			throw new IllegalArgumentException("limit exceeds maximum allowed value.");
 		}
 		return parsedLimit;
+	}
+
+	private int parseOffset(String rawOffset, String decodedOffset) {
+		if (rawOffset == null && decodedOffset == null) {
+			return 0;
+		}
+		String valueToValidate = rawOffset == null ? decodedOffset : rawOffset;
+		if (valueToValidate == null || valueToValidate.isBlank() || !valueToValidate.matches("[0-9]+")) {
+			throw new IllegalArgumentException("offset must be an integer.");
+		}
+		try {
+			return Integer.parseInt(valueToValidate);
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException("offset must be an integer.", e);
+		}
+	}
+
+	private boolean parseBoolean(String rawValue, String decodedValue, boolean defaultValue, String paramName) {
+		if (rawValue == null && decodedValue == null) {
+			return defaultValue;
+		}
+		String valueToValidate = rawValue == null ? decodedValue : rawValue;
+		if (valueToValidate == null || valueToValidate.isBlank()) {
+			throw new IllegalArgumentException(paramName + " must be true or false.");
+		}
+		if ("true".equalsIgnoreCase(valueToValidate)) {
+			return true;
+		}
+		if ("false".equalsIgnoreCase(valueToValidate)) {
+			return false;
+		}
+		throw new IllegalArgumentException(paramName + " must be true or false.");
 	}
 }

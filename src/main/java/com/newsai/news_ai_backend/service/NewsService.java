@@ -12,11 +12,11 @@ import com.newsai.news_ai_backend.dto.StoryResponseDto;
 
 public interface NewsService {
 
-	List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit);
+	List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit, int offset);
 
 	NewsDiscoveryResponseDto discoverNews(NewsDiscoveryRequestDto request);
 
-	List<NewsFeedDto> getHotNews(String query, int limit);
+	List<NewsFeedDto> getHotNews(String query, int limit, int offset);
 
 	List<CountryCountDto> getCountries();
 

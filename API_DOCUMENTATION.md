@@ -81,7 +81,21 @@ Location fields may be empty strings when no valid value is available.
 - Must be an integer.
 - Must not be negative.
 - `limit=0` returns `200 OK` with empty data.
+- Max allowed value is `100`.
 - Invalid values like `%`, `1%`, `1%1`, `#`, `1#`, `1&5`, or non-numeric values should return a `400` wrapper.
+
+`offset`:
+- Optional pagination offset for `/feed` and `/hot`.
+- Defaults to `0`.
+- Must be a non-negative integer.
+- Use with `limit` for load-more flows. Example: first call `limit=50&offset=0`, next call `limit=50&offset=50`, then `offset=100`.
+
+`searchValue`:
+- Optional boolean for `/feed`.
+- Defaults to `false`.
+- Must be `true` or `false` when supplied.
+- When `true`, `/feed` ignores `country`, `state`, `city`, and `category` filters and searches all enriched news by `q`.
+- Use this for the main UI search box so searches like `Michael Jackson` are not restricted by the India default feed.
 
 `q`:
 - Optional search keyword.
@@ -90,6 +104,7 @@ Location fields may be empty strings when no valid value is available.
 Filter behavior:
 - `country`, `state`, `city`, and `category` support matching existing enriched news.
 - Combined filters work together.
+- `country` defaults to `India` when omitted, so `/api/news/feed` returns India news by default.
 - `country=World` means world feed, including non-India news and fallback World rows.
 
 ## 1. Fetch All News Feed
@@ -104,21 +119,38 @@ Example:
 http://localhost:8080/api/news/feed?limit=5
 ```
 
+Notes:
+- Country defaults to `India`, so this returns India news unless `country` is explicitly provided.
+- Use `searchValue=true` for global search from the main UI search box. In that mode, country/state/city/category filters are ignored and only `q`, `limit`, and `offset` drive the result set.
+- Supports `offset` for pagination/load more.
+
+Global search example:
+
+```text
+http://localhost:8080/api/news/feed?q=Michael%20Jackson&searchValue=true&limit=20&offset=0
+```
+
+Load more example:
+
+```text
+http://localhost:8080/api/news/feed?limit=50&offset=50
+```
+
 Response:
 
 ```json
 {
   "data": [
     {
-      "id": 4411,
-      "headline": "K2 Medical Research Opens Boston Area Site in Foxboro, MA",
-      "briefStory": "K2 Medical Research opened its newest clinical research site in Foxboro, MA, expanding access to clinical trials and innovative treatments.",
-      "category": "Health",
-      "source": "PRNewswire",
-      "imageUrl": "https://mma.prnewswire.com/media/2992607/K2_Medical_Research_K2_East_Providence_Team.jpg?p=facebook",
-      "country": "United States",
-      "state": "Massachusetts",
-      "city": "Foxboro",
+      "id": 4395,
+      "headline": "Myanmar Won't Allow Territory to be Used Against India's Interests",
+      "briefStory": "Myanmar has stated that it will not allow its territory to be used against India's interests.",
+      "category": "International Relations",
+      "source": "The Indian Express",
+      "imageUrl": "https://images.indianexpress.com/2026/06/UPSC-Key-2nd-June-2026.jpg",
+      "country": "India",
+      "state": "",
+      "city": "",
       "publishedAt": "2026-06-02"
     }
   ],
@@ -216,6 +248,13 @@ http://localhost:8080/api/news/hot?limit=2
 Notes:
 - Hot news is ordered by AI importance score and recency.
 - Supports `q` search.
+- Supports `offset` for pagination/load more.
+
+Load more example:
+
+```text
+http://localhost:8080/api/news/hot?limit=50&offset=50
+```
 
 ## 8. Get List of Countries
 
@@ -628,14 +667,11 @@ Notes:
 
 Suggested app flow:
 
-1. Load country list from `GET /api/news/countries`.
-2. Load India filter lists from:
-   - `GET /api/news/states`
-   - `GET /api/news/cities`
-   - `GET /api/news/categories`
-3. Show main feed from `GET /api/news/feed?limit=20`.
-4. Apply filters by adding `country`, `state`, `city`, `category`, and `q`.
-5. Show hot news from `GET /api/news/hot?limit=20`.
+1. Home Top Stories should call `GET /api/news/hot?limit=20&offset=0`.
+2. Load country/state/city/category lookup APIs only when Explore/filter dropdowns need them.
+3. Main search box should call `GET /api/news/feed?q={keyword}&searchValue=true&limit=20&offset=0` to search all news globally.
+4. Apply normal feed filters by adding `country`, `state`, `city`, `category`, and `q` to `GET /api/news/feed?limit=20&offset=0`; this keeps the India default unless `country=World` or another country is supplied.
+5. For View All / Load More, request 50 records at a time and increment `offset`: `limit=50&offset=0`, `limit=50&offset=50`, `limit=50&offset=100`.
 6. Open detail/story page with `GET /api/news/{id}?language=ENGLISH&style=genz&refresh=false`.
 7. Use story chat with `POST /api/news/{id}/ask`.
 8. Use discover flow with `POST /api/news/discover` when the user cannot find a news item.

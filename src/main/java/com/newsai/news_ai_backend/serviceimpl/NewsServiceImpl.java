@@ -18,6 +18,7 @@ import com.newsai.news_ai_backend.dto.NewsFeedDto;
 import com.newsai.news_ai_backend.dto.StoryResponseDto;
 import com.newsai.news_ai_backend.model.NewsAiEnrichment;
 import com.newsai.news_ai_backend.model.NewsArticle;
+import com.newsai.news_ai_backend.pagination.OffsetBasedPageRequest;
 import com.newsai.news_ai_backend.model.NewsChatMessage;
 import com.newsai.news_ai_backend.model.NewsDiscoverRequest;
 import com.newsai.news_ai_backend.model.NewsDiscoverResult;
@@ -77,10 +78,11 @@ public class NewsServiceImpl implements NewsService {
 	}
 
 	@Override
-	public List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit) {
+	public List<NewsFeedDto> getFeed(String country, String category, String state, String city, String query, int limit, int offset) {
 		int safeLimit = Math.max(1, Math.min(limit, 100));
+		int safeOffset = Math.max(0, offset);
 		return enrichmentRepository.findFeed(clean(country), clean(category), clean(state), clean(city), clean(query),
-				PageRequest.of(0, safeLimit))
+				new OffsetBasedPageRequest(safeLimit, safeOffset))
 				.stream()
 				.map(this::toFeedDto)
 				.toList();
@@ -230,9 +232,10 @@ public class NewsServiceImpl implements NewsService {
 	}
 
 	@Override
-	public List<NewsFeedDto> getHotNews(String query, int limit) {
+	public List<NewsFeedDto> getHotNews(String query, int limit, int offset) {
 		int safeLimit = Math.max(1, Math.min(limit, 100));
-		return enrichmentRepository.findHot(clean(query), PageRequest.of(0, safeLimit))
+		int safeOffset = Math.max(0, offset);
+		return enrichmentRepository.findHot(clean(query), new OffsetBasedPageRequest(safeLimit, safeOffset))
 				.stream()
 				.map(this::toFeedDto)
 				.toList();

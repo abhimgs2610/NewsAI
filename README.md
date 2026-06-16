@@ -15,7 +15,7 @@ NewsAI fetches real news, stores raw provider data, enriches it with AI, and gen
 - Fetch latest India and world news from NewsAPI and GNews.
 - Store raw provider articles separately from AI-generated data.
 - Enrich articles using Groq with category, headline, brief story, importance score, country, state, and city.
-- Browse feed with search and filters for country, state, city, and category.
+- Browse feed with search and filters for country, state, city, and category. Feed defaults to India news, while `searchValue=true` searches globally.
 - Support `country=World` as a world feed for non-India news and fallback World rows.
 - Fetch hot news ordered by AI importance score and recency.
 - Generate long-form NewsAI stories in a human, conversational style.
@@ -25,6 +25,7 @@ NewsAI fetches real news, stores raw provider data, enriches it with AI, and gen
 - Process discover results asynchronously with load-more support.
 - Run scheduled batch sync automatically.
 - Pause batch processing using a configured `STOP.txt` file.
+- Support offset pagination on feed and hot news for UI load-more flows.
 - Return all APIs in a consistent response wrapper.
 - Log internal errors without exposing sensitive details in API responses.
 
@@ -167,8 +168,8 @@ Full API details are documented in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 Main API groups:
 
-- `GET /api/news/feed` - feed, filters, and search.
-- `GET /api/news/hot` - hot news by importance score.
+- `GET /api/news/feed` - India-default feed, filters, search, and offset pagination.
+- `GET /api/news/hot` - hot news by importance score with offset pagination.
 - `GET /api/news/countries` - country list with news counts.
 - `GET /api/news/states` - India-only state list.
 - `GET /api/news/cities` - India-only city list, optionally by state.
@@ -330,16 +331,22 @@ http://localhost:8080
 
 ## Example API Calls
 
-Fetch feed:
+Fetch feed. Country defaults to India when omitted:
 
 ```http
 GET http://localhost:8080/api/news/feed?limit=5
 ```
 
-Search feed:
+Search India-default feed:
 
 ```http
 GET http://localhost:8080/api/news/feed?q=trump&limit=3
+```
+
+Search all news globally from the UI search box:
+
+```http
+GET http://localhost:8080/api/news/feed?q=Michael%20Jackson&searchValue=true&limit=20
 ```
 
 Fetch India news:
@@ -352,6 +359,24 @@ Fetch world news:
 
 ```http
 GET http://localhost:8080/api/news/feed?country=World&limit=5
+```
+
+Load more feed records:
+
+```http
+GET http://localhost:8080/api/news/feed?country=India&limit=50&offset=50
+```
+
+Fetch hot news:
+
+```http
+GET http://localhost:8080/api/news/hot?limit=20&offset=0
+```
+
+Load more hot news:
+
+```http
+GET http://localhost:8080/api/news/hot?limit=50&offset=50
 ```
 
 Fetch story:
