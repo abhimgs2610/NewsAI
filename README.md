@@ -23,6 +23,7 @@ NewsAI fetches real news, stores raw provider data, enriches it with AI, and gen
 - Ask follow-up questions on a news story using chat history.
 - Discover missing news when the user cannot find what they are looking for.
 - Process discover results asynchronously with load-more support.
+- Support frontend global search, view-all pagination, story reader, story Q&A, and saved-story UI flows.
 - Run scheduled batch sync automatically.
 - Pause batch processing using a configured `STOP.txt` file.
 - Support offset pagination on feed and hot news for UI load-more flows.
@@ -455,5 +456,8 @@ Backend v1 is feature-complete for the current product plan:
 - Async discover with load more is implemented.
 - Batch scheduling and pause control are implemented.
 - API documentation is available.
+- Angular frontend integration is underway with Home, Explore, Discover, Story Reader, Story Chat, and Saved Stories flows.
 
-Next major step: build the frontend experience from scratch.
+Next major step: continue polishing the frontend experience and add production-ready UI features such as account-backed saved stories, history, profile, and settings.
+
+

@@ -675,6 +675,7 @@ Suggested app flow:
 6. Open detail/story page with `GET /api/news/{id}?language=ENGLISH&style=genz&refresh=false`.
 7. Use story chat with `POST /api/news/{id}/ask`.
 8. Use discover flow with `POST /api/news/discover` when the user cannot find a news item.
+9. Saved stories are currently handled in the Angular UI using browser local storage; there is no backend saved-story API yet.
 
 
 Updated discover behavior:
